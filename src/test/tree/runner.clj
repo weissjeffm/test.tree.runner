@@ -1,9 +1,6 @@
-(ns katello.testrunner
+(ns test.tree.runner
   (:require clojure.pprint
-            [katello.tests.suite :as suite]
-            [bugzilla.checker :refer [open-bz-bugs]]
-            [test.tree :refer [state]] 
-            katello.conf
+            [test.tree :refer [state]]
             [clojure.pprint :refer [pprint *print-right-margin*]])
   (:use seesaw.core
         seesaw.chooser)
@@ -13,15 +10,14 @@
            [javax.swing.tree TreePath]
            [javax.swing.tree DefaultTreeCellRenderer]
            [java.text SimpleDateFormat]
-           [java.lang.System])
-  )
+           [java.lang.System]))
 
 (def win-width 900)
 (def win-height 600)
 (def win-title "Katello Test Runner")
 
 (def prog-bar (progress-bar :value 0))
-(def test-map suite/katello-tests)
+(def ^:dynamic test-map nil)
 (def test-tree-root (DefaultMutableTreeNode. "Test Tree")) 
 (def test-tree (JTree. test-tree-root)) 
 (def output-tree-root (DefaultMutableTreeNode. "Test Results")) 
@@ -64,12 +60,9 @@
   (let [test-results @test-results-ref] 
     (if (nil? test-results)
         false
-        (not= (state (first test-results) (second test-results)) :finished)))
-  )
+        (not= (state (first test-results) (second test-results)) :finished))))
 
-(defn add-test-groups
-  [test-group tree-node]
-
+(defn add-test-groups [test-group tree-node]
   (let [group-name (first (:groups test-group))
         new-node (DefaultMutableTreeNode. (str (:name test-group)))]
 
@@ -78,11 +71,9 @@
     (when (contains? test-group :more)
       (.setUserObject new-node (first (:groups test-group)))
       (doseq [child-group (:more test-group)]
-        (add-test-groups child-group new-node))))
-  )
+        (add-test-groups child-group new-node)))))
 
-(defn get-test-entry-from-path
-  [test-map path path-idx]
+(defn get-test-entry-from-path [test-map path path-idx]
   (let [next-path-idx (inc path-idx)]
   (if (<= (.getPathCount path) next-path-idx)
     test-map
@@ -92,11 +83,9 @@
         child-test-map (nth (:more test-map) (.getIndex cur-node child-node))]
     (if (<= (dec (.getPathCount path)) next-path-idx)
       child-test-map
-      (get-test-entry-from-path child-test-map path next-path-idx))))) 
-  )
+      (get-test-entry-from-path child-test-map path next-path-idx))))))
 
-(defn selected-item-changed
-  [test-info event-info]
+(defn selected-item-changed [test-info event-info]
   (let [path (.getPath event-info)
         sel-test (get-test-entry-from-path test-map path 1)
         panel-print (fn [& stuff]
@@ -109,7 +98,7 @@
                           "Steps: \n" (panel-print (:steps sel-test))))))
 
 
-(def dateformat (SimpleDateFormat. "MM/dd/yyyy hh:mm:ss") )
+(def dateformat (SimpleDateFormat. "MM/dd/yyyy hh:mm:ss"))
 
 (defn get-date-string [d]
   (when-not (nil? d)
@@ -142,8 +131,7 @@
               :while (not (update-output-node report-group
                                               report
                                               child-group 
-                                              (.nextElement child-enum)))])) 
-    )
+                                              (.nextElement child-enum)))])))
 
   (let [results (:report report)]
     (if (= test-group report-group)
@@ -173,8 +161,7 @@
                               running-test 
                               (.getFirstChild output-tree-root)))) 
       (.setMaximum prog-bar @test-total)
-      (.setValue prog-bar @test-done))
-    )
+      (.setValue prog-bar @test-done)))
   (def need-save? true))
 
 
@@ -204,28 +191,29 @@
     (while (is-running?) (Thread/sleep 500)) 
     (alert "Test Run Complete")
     (.setValue prog-bar 0)
-    (.setStringPainted prog-bar false))
-  )
+    (.setStringPainted prog-bar false)))
 
 
 (defn mouse-pressed [e]
   (when (= (.getButton e) 3)
     (let [x (.getX e)
           y (.getY e)]
-      (with-widgets [(menu-item :text "Run Tests" 
-                                :id :run-menu-item 
-                                :listen [:action (fn [sender] (run-test-click test-tree))]) 
-                     (menu-item :text "Terminate Run" 
-                                :id :terminate-menu-item
-                                :listen [:action (fn [sender] (test.tree/terminate-all-tests (first @test-results-ref)))])
-                     (popup :items [run-menu-item terminate-menu-item] 
-                            :id :popup-menu)]
+      (with-widgets
+          [(menu-item :text "Run Tests" 
+                      :id :run-menu-item 
+                      :listen [:action (fn [sender]
+                                         (run-test-click test-tree))]) 
+           (menu-item :text "Terminate Run" 
+                      :id :terminate-menu-item
+                      :listen [:action (fn [sender]
+                                         (test.tree/terminate-all-tests (first @test-results-ref)))])
+           (popup :items [run-menu-item terminate-menu-item] 
+                  :id :popup-menu)]
         (let [running? (is-running?)]
           (config! run-menu-item :enabled? (not running?)) 
           (config! terminate-menu-item :enabled? running?)) 
         (->> (.getPathForLocation test-tree x y) (.setSelectionPath test-tree))
-        (.show popup-menu test-tree x y)))) 
-  )
+        (.show popup-menu test-tree x y)))))
 
 (defn open-results [sender]
   ; TODO: Implementation
@@ -241,17 +229,13 @@
                   (binding [*out* (java.io.FileWriter. filename)] 
                            (prn (second @test-results-ref))
                            )
-                  (def need-save? false)
-                  )
-                ))
-  )
+                  (def need-save? false)))))
 
 (defn reset-state []
   (reset! test-results-ref nil)
   ;(.setBackgroundSelectionColor output-tree-renderer java.awt.Color/red)
   (.removeAllChildren output-tree-root)
-  (.setCellRenderer output-tree output-tree-renderer)
-  )
+  (.setCellRenderer output-tree output-tree-renderer))
 
 (defn start-gui [& args]
 
@@ -296,16 +280,6 @@
       (add-test-groups test-map test-tree-root)
       (doseq [node-index [0 1]]  (.expandRow test-tree node-index))
 
-      (show! main-frame)
-      )
-    )
-  )
+      (show! main-frame))))
 
-(defn -main [& args]
 
-  ;(add-watch test-results-ref nil #(refresh-test-output %1 %2 %3 %4))
-  (invoke-later
-    (load "/bootstrap")
-    (def in-repl? false)
-    (start-gui args)
-  ))
