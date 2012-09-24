@@ -14,12 +14,13 @@
 
 (def win-width 900)
 (def win-height 600)
-(def win-title "Katello Test Runner")
+(def win-title "Interactive Test Runner")
 
 (def prog-bar (progress-bar :value 0))
 (def ^:dynamic test-map nil)
 (def test-tree-root (DefaultMutableTreeNode. "Test Tree")) 
-(def test-tree (JTree. test-tree-root)) 
+(def test-tree-model (DefaultTreeModel. test-tree-root))
+(def test-tree (JTree. test-tree-model)) 
 (def output-tree-root (DefaultMutableTreeNode. "Test Results")) 
 (def output-tree-model (DefaultTreeModel. output-tree-root))
 (def output-tree (JTree. output-tree-model))
@@ -44,16 +45,15 @@
                     child-str (str child)
                     status (->> child-str (re-find #"Status: (\w+)") second keyword)
                     result (->> child-str (re-find #"Result: (\w+)") second keyword)]
+                (when (keyword? result)
+                  (.setOpaque this true)
+                  (.setBackground this (if (= result :pass) 
+                                         java.awt.Color/green
+                                         java.awt.Color/red)))
                 (when (keyword? status)
                   (.setOpaque this true)
-                  (.setBackground this 
-                                  (cond (= status :queued)  java.awt.Color/magenta
-                                        (= status :running) java.awt.Color/yellow
-                                        (= status :done)    (if (= result :pass) 
-                                                              java.awt.Color/green
-                                                              java.awt.Color/red)
-                                        :else java.awt.Color/white)) 
-                  (reset! continue false))))) 
+                  (cond (= status :queued) (.setBackground this java.awt.Color/magenta)
+                        (= status :running) (.setBackground this java.awt.Color/yellow))))))
           this)))))
 
 (defn is-running? []
@@ -69,7 +69,6 @@
     (.add tree-node new-node)
 
     (when (contains? test-group :more)
-      (.setUserObject new-node (first (:groups test-group)))
       (doseq [child-group (:more test-group)]
         (add-test-groups child-group new-node)))))
 
@@ -231,15 +230,38 @@
                            )
                   (def need-save? false)))))
 
+
+(defn load-test-tree []
+  (.removeAllChildren test-tree-root)
+  (add-test-groups test-map test-tree-root)
+  (.reload test-tree-model)
+  (doseq [node-index [0 1]] (.expandRow test-tree node-index)))
+
+
+(defn load-test-tree-map [sender]
+  (let [tree-map-symbol (input "Enter fully qualified test tree map symbol:"
+                               :title "Load Test Tree Map" 
+                               :type :question)]
+    (when-not (nil? tree-map-symbol) 
+      (try
+        (def ^:dynamic test-map (-> tree-map-symbol read-string eval))
+        (load-test-tree)  
+        (catch Exception e (alert (.getMessage e)))))))
+
+
 (defn reset-state []
   (reset! test-results-ref nil)
-  ;(.setBackgroundSelectionColor output-tree-renderer java.awt.Color/red)
+  (.removeAllChildren test-tree-root)
+  (.reload test-tree-model)
   (.removeAllChildren output-tree-root)
-  (.setCellRenderer output-tree output-tree-renderer))
+  (.reload output-tree-model))
 
-(defn start-gui [& args]
+
+(defn start-gui [& {:keys [test-tree-map]}]
 
   (reset-state)
+
+  (.setCellRenderer output-tree output-tree-renderer) 
 
   (let [tree-scroll-pane (scrollable test-tree :hscroll :as-needed :vscroll :always)
         test-info (text :editable? false :multi-line? true :rows 5)
@@ -256,11 +278,14 @@
                    (menu-item :text "Save Results" 
                               :id :save-menu 
                               :listen [:action #(save-results %)])
+                   (menu-item :text "Load Test Tree"
+                              :id :load-test-tree-menu
+                              :listen [:action #(load-test-tree-map %)])
                    (menu-item :text "Exit" 
                               :id :exit-menu)
                    (menu      :text "File" 
                               :id :file-menu 
-                              :items [open-menu save-menu (separator) exit-menu])
+                              :items [open-menu save-menu (separator) load-test-tree-menu (separator) exit-menu])
                    (menubar   :id :main-menu-bar 
                               :items [file-menu])
                    (frame     :id :main-frame
@@ -277,8 +302,9 @@
       (listen test-tree
         :mouse-pressed #(mouse-pressed %))
 
-      (add-test-groups test-map test-tree-root)
-      (doseq [node-index [0 1]]  (.expandRow test-tree node-index))
+      (when-not (nil? test-tree-map) 
+        (def ^:dynamic test-map test-tree-map)
+        (load-test-tree))
 
       (show! main-frame))))
 
