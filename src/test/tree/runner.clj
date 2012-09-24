@@ -74,15 +74,15 @@
 
 (defn get-test-entry-from-path [test-map path path-idx]
   (let [next-path-idx (inc path-idx)]
-  (if (<= (.getPathCount path) next-path-idx)
-    test-map
-  (let [cur-node (.getPathComponent path path-idx) 
-        child-node (.getPathComponent path next-path-idx)
-        index (.getIndex cur-node child-node)
-        child-test-map (nth (:more test-map) (.getIndex cur-node child-node))]
-    (if (<= (dec (.getPathCount path)) next-path-idx)
-      child-test-map
-      (get-test-entry-from-path child-test-map path next-path-idx))))))
+    (if (<= (.getPathCount path) next-path-idx)
+      test-map
+      (let [cur-node (.getPathComponent path path-idx) 
+            child-node (.getPathComponent path next-path-idx)
+            index (.getIndex cur-node child-node)
+            child-test-map (nth (:more test-map) (.getIndex cur-node child-node))]
+        (if (<= (dec (.getPathCount path)) next-path-idx)
+          child-test-map
+          (get-test-entry-from-path child-test-map path next-path-idx))))))
 
 (defn selected-item-changed [test-info event-info]
   (let [path (.getPath event-info)
@@ -92,8 +92,8 @@
                         (with-out-str 
                           (apply pprint stuff))))]
     (text! test-info (str "Groups: " (:groups sel-test) "\n" 
-                          "Parameters: " (panel-print (:parameters sel-test)) "\n"
-                          "Blockers: " (panel-print (:blockers sel-test)) "\n"
+                          "Parameters: " (panel-print (:parameters sel-test))
+                          "Blockers: " (panel-print (:blockers sel-test))
                           "Steps: \n" (panel-print (:steps sel-test))))))
 
 
