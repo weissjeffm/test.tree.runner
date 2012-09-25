@@ -49,9 +49,9 @@
                     result (->> child-str (re-find #"Result: (\w+)") second keyword)]
                 (when (keyword? result)
                   (.setOpaque this true)
-                  (cond (= result :pass) (.setBackground this java.awt.Color/green) 
-                        (= result :skip) (.setBackground this java.awt.Color/yellow)
-                        :else            (.setBackground this java.awt.Color/red)))
+                  (.setBackground this (cond (= result :pass) java.awt.Color/green
+                                             (= result :skip) java.awt.Color/yellow
+                                             :else            java.awt.Color/red)))
                 (when (keyword? status)
                   (.setOpaque this true)
                   (cond (= status :queued)  (.setBackground this java.awt.Color/lightGray)
@@ -276,8 +276,8 @@
         info-scroll-pane (scrollable test-info-table :hscroll :as-needed :vscroll :as-needed)
         left-pane (top-bottom-split tree-scroll-pane info-scroll-pane :divider-location (/ (* win-height 3) 4))]
 
-    (-> (.getColumn test-info-table "Property") (.setPreferredWidth 100))
-    (-> (.getColumn test-info-table "Property") (.setMaxWidth 150))
+    (-> test-info-table (.getColumn "Property") (.setPreferredWidth 100))
+    (-> test-info-table (.getColumn "Property") (.setMaxWidth 150))
 
     (with-widgets [(border-panel :id :right-pane
                                  :center output-tree-scroll
