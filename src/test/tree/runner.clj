@@ -7,6 +7,7 @@
   (:import [javax.swing.tree DefaultMutableTreeNode]
            [javax.swing JTree]
            [javax.swing.tree DefaultTreeModel]
+           [javax.swing.table DefaultTableModel]
            [javax.swing.tree TreePath]
            [javax.swing.tree DefaultTreeCellRenderer]
            [java.text SimpleDateFormat]
@@ -18,6 +19,7 @@
 
 (def prog-bar (progress-bar :value 0))
 (def ^:dynamic test-map nil)
+(def test-info-model (DefaultTableModel. (to-array ["Property" "Value"]) 4))
 (def test-tree-root (DefaultMutableTreeNode. "Test Tree")) 
 (def test-tree-model (DefaultTreeModel. test-tree-root))
 (def test-tree (JTree. test-tree-model)) 
@@ -47,13 +49,13 @@
                     result (->> child-str (re-find #"Result: (\w+)") second keyword)]
                 (when (keyword? result)
                   (.setOpaque this true)
-                  (.setBackground this (if (= result :pass) 
-                                         java.awt.Color/green
-                                         java.awt.Color/red)))
+                  (.setBackground this (cond (= result :pass) java.awt.Color/green
+                                             (= result :skip) java.awt.Color/yellow
+                                             :else            java.awt.Color/red)))
                 (when (keyword? status)
                   (.setOpaque this true)
-                  (cond (= status :queued) (.setBackground this java.awt.Color/magenta)
-                        (= status :running) (.setBackground this java.awt.Color/yellow))))))
+                  (cond (= status :queued)  (.setBackground this java.awt.Color/lightGray)
+                        (= status :running) (.setBackground this java.awt.Color/magenta))))))
           this)))))
 
 (defn is-running? []
@@ -74,27 +76,27 @@
 
 (defn get-test-entry-from-path [test-map path path-idx]
   (let [next-path-idx (inc path-idx)]
-  (if (<= (.getPathCount path) next-path-idx)
-    test-map
-  (let [cur-node (.getPathComponent path path-idx) 
-        child-node (.getPathComponent path next-path-idx)
-        index (.getIndex cur-node child-node)
-        child-test-map (nth (:more test-map) (.getIndex cur-node child-node))]
-    (if (<= (dec (.getPathCount path)) next-path-idx)
-      child-test-map
-      (get-test-entry-from-path child-test-map path next-path-idx))))))
+    (if (<= (.getPathCount path) next-path-idx)
+      test-map
+      (let [cur-node (.getPathComponent path path-idx) 
+            child-node (.getPathComponent path next-path-idx)
+            index (.getIndex cur-node child-node)
+            child-test-map (nth (:more test-map) (.getIndex cur-node child-node))]
+        (if (<= (dec (.getPathCount path)) next-path-idx)
+          child-test-map
+          (get-test-entry-from-path child-test-map path next-path-idx))))))
 
-(defn selected-item-changed [test-info event-info]
+(defn selected-item-changed [event-info]
   (let [path (.getPath event-info)
         sel-test (get-test-entry-from-path test-map path 1)
         panel-print (fn [& stuff]
                       (binding [*print-right-margin* 60]
                         (with-out-str 
                           (apply pprint stuff))))]
-    (text! test-info (str "Groups: " (:groups sel-test) "\n" 
-                          "Parameters: " (panel-print (:parameters sel-test)) "\n"
-                          "Blockers: " (panel-print (:blockers sel-test)) "\n"
-                          "Steps: \n" (panel-print (:steps sel-test))))))
+    (.setValueAt test-info-model (:groups sel-test) 0, 1)
+    (.setValueAt test-info-model (panel-print (:parameters sel-test)) 1, 1)
+    (.setValueAt test-info-model (panel-print (:blockers sel-test)) 2, 1)
+    (.setValueAt test-info-model (panel-print (:steps sel-test)) 3, 1)))
 
 
 (def dateformat (SimpleDateFormat. "MM/dd/yyyy hh:mm:ss"))
@@ -263,10 +265,19 @@
 
   (.setCellRenderer output-tree output-tree-renderer) 
 
+  ; Set up test info table
+  (.setValueAt test-info-model "Groups:" 0, 0)
+  (.setValueAt test-info-model "Parameters:" 1, 0)
+  (.setValueAt test-info-model "Blockers:" 2, 0)
+  (.setValueAt test-info-model "Steps:" 3, 0)
+
   (let [tree-scroll-pane (scrollable test-tree :hscroll :as-needed :vscroll :always)
-        test-info (text :editable? false :multi-line? true :rows 5)
-        info-scroll-pane (scrollable test-info :hscroll :as-needed :vscroll :as-needed)
+        test-info-table (table :auto-resize :last-column :model test-info-model :show-grid? true :fills-viewport-height? true)
+        info-scroll-pane (scrollable test-info-table :hscroll :as-needed :vscroll :as-needed)
         left-pane (top-bottom-split tree-scroll-pane info-scroll-pane :divider-location (/ (* win-height 3) 4))]
+
+    (-> test-info-table (.getColumn "Property") (.setPreferredWidth 100))
+    (-> test-info-table (.getColumn "Property") (.setMaxWidth 150))
 
     (with-widgets [(border-panel :id :right-pane
                                  :center output-tree-scroll
@@ -298,7 +309,7 @@
       (listen exit-menu :mouse-pressed 
         (fn [sender] (if in-repl? (.dispose main-frame) (. System exit 0))))
       (listen test-tree 
-        :selection #(selected-item-changed test-info %))
+        :selection #(selected-item-changed %))
       (listen test-tree
         :mouse-pressed #(mouse-pressed %))
 
@@ -307,5 +318,3 @@
         (load-test-tree))
 
       (show! main-frame))))
-
-
