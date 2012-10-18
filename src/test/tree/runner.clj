@@ -137,6 +137,7 @@
   (let [results (:report report)]
     (if (= test-group report-group)
       (do
+        (add-report-node output-node "Stack Trace" (-> results :error :throwable))
         (add-report-node output-node "Status" (:status report)) 
         (add-report-node output-node "Result" (:result results))
         (add-report-node output-node "Start Time" (get-date-string (:start-time results))) 
