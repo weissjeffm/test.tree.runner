@@ -19,7 +19,7 @@
 
 (def prog-bar (progress-bar :value 0))
 (def ^:dynamic test-map nil)
-(def test-info-model (DefaultTableModel. (to-array ["Property" "Value"]) 4))
+(def test-info-model (DefaultTableModel. (to-array ["Property" "Value"]) 6))
 (def test-tree-root (DefaultMutableTreeNode. "Test Tree")) 
 (def test-tree-model (DefaultTreeModel. test-tree-root))
 (def test-tree (JTree. test-tree-model)) 
@@ -92,11 +92,10 @@
         panel-print (fn [& stuff]
                       (binding [*print-right-margin* 60]
                         (with-out-str 
-                          (apply pprint stuff))))]
-    (.setValueAt test-info-model (:groups sel-test) 0, 1)
-    (.setValueAt test-info-model (panel-print (:parameters sel-test)) 1, 1)
-    (.setValueAt test-info-model (panel-print (:blockers sel-test)) 2, 1)
-    (.setValueAt test-info-model (panel-print (:steps sel-test)) 3, 1)))
+                          (apply pprint stuff))))
+        fields [:file :line :groups :parameters :blockers :steps]]
+    (doseq [index (-> fields count range)]
+      (.setValueAt test-info-model (panel-print ((nth fields index) sel-test)) index 1))))
 
 
 (def dateformat (SimpleDateFormat. "MM/dd/yyyy hh:mm:ss"))
@@ -217,9 +216,11 @@
         (->> (.getPathForLocation test-tree x y) (.setSelectionPath test-tree))
         (.show popup-menu test-tree x y)))))
 
+
 (defn open-results [sender]
   ; TODO: Implementation
   )
+
 
 (defn save-results [sender]
   (cond (is-running?)  (alert "Wait for tests to complete before saving results.")
@@ -267,15 +268,14 @@
   (.setCellRenderer output-tree output-tree-renderer) 
 
   ; Set up test info table
-  (.setValueAt test-info-model "Groups:" 0, 0)
-  (.setValueAt test-info-model "Parameters:" 1, 0)
-  (.setValueAt test-info-model "Blockers:" 2, 0)
-  (.setValueAt test-info-model "Steps:" 3, 0)
+  (let [headers ["File:" "Line:" "Groups:" "Parameters:" "Blockers:" "Steps:"]]
+    (doseq [index (-> headers count range)]
+      (.setValueAt test-info-model (nth headers index) index 0)))
 
   (let [tree-scroll-pane (scrollable test-tree :hscroll :as-needed :vscroll :always)
         test-info-table (table :auto-resize :last-column :model test-info-model :show-grid? true :fills-viewport-height? true)
         info-scroll-pane (scrollable test-info-table :hscroll :as-needed :vscroll :as-needed)
-        left-pane (top-bottom-split tree-scroll-pane info-scroll-pane :divider-location (/ (* win-height 3) 4))]
+        left-pane (top-bottom-split tree-scroll-pane info-scroll-pane :divider-location (/ (* win-height 5) 8))]
 
     (-> test-info-table (.getColumn "Property") (.setPreferredWidth 100))
     (-> test-info-table (.getColumn "Property") (.setMaxWidth 150))
