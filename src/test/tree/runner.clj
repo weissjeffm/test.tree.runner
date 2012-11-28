@@ -42,18 +42,15 @@
 (def output-tree-renderer 
   (proxy [DefaultTreeCellRenderer] []
     (getTreeCellRendererComponent [tree value selected? expanded? leaf? row hasFocus?]
-      (let [this (proxy-super getTreeCellRendererComponent tree value selected? expanded? leaf? row hasFocus?)
-            ;icon (ImageIcon. "icons/download-small.jpeg")
-            ]
+      (let [this (proxy-super getTreeCellRendererComponent tree value selected? expanded? leaf? row hasFocus?)]
         (locking output-tree-lock
           (.setOpaque this false) 
           (let [child-enum (.children value)]
-            (while (and (.hasMoreElements child-enum) @continue)
+            (while (.hasMoreElements child-enum) 
               (let [child (.nextElement child-enum)
                     child-str (str child)
                     status (->> child-str (re-find #"Status: (\w+)") second keyword)
                     result (->> child-str (re-find #"Result: (\w+)") second keyword)]
-                ;(.setIcon this icon)
                 (when (keyword? result)
                   (.setOpaque this true)
                   (.setBackground this (cond (= result :pass) java.awt.Color/green
@@ -68,9 +65,10 @@
 (def trace-tree-renderer
   (proxy [DefaultTreeCellRenderer] []
     (getTreeCellRendererComponent [tree value selected? expanded? leaf? row hasFocus?]
-      (let [this (proxy-super getTreeCellRendererComponent tree value selected? expanded? leaf? row hasFocus?)]
-        (.setIcon this 
-                  (ImageIcon. (str "/home/gstoecke/Code/sandbox/test.tree.runner/src/test/tree/icons/" (if leaf? "upload" "download") "-small.jpg")))
+      (let [this (proxy-super getTreeCellRendererComponent tree value selected? expanded? leaf? row hasFocus?)
+            rsrc (str "test/tree/icons/" (if leaf? "upload" "download") "-small.jpg")
+            url (-> (ClassLoader/getSystemClassLoader) (.getResource rsrc))]
+        (.setIcon this (ImageIcon. url))
         this))))
 
 
@@ -238,7 +236,7 @@
                                      :vscroll :always)]
     (update-trace-tree trace-tree)
     (swap! trace-trees conj trace-tree)
-    (.setCellRenderer trace-tree trace-tree-renderer) 
+    (.setCellRenderer trace-tree trace-tree-renderer)
     ; Expand all nodes in trace tree
     (loop [row 0
            row-count (.getRowCount trace-tree)]
@@ -249,7 +247,7 @@
     (with-widgets [(frame :id :trace-frame
                           :title (str "Test Trace: " (:name test-map))
                           :content trace-tree-panel
-                          :size [480 :by 600])]
+                          :size [600 :by 600])]
       (show! trace-frame))))
 
 
