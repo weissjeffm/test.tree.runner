@@ -300,7 +300,7 @@
 
 
 (defn run-test-click [test-tree]
-  ; TODO:) Check need-save?
+  ;; TODO:) Check need-save?
   (if (is-running?)
     (alert "Wait for current run to complete before running more tests.")
     
@@ -314,12 +314,15 @@
       (doseq [node-index (-> 3 range reverse)] 
         (.expandRow output-tree node-index))
   
-      ; Start test run
+      ;; Start test run
       (future 
         (debug/debug 
-          (with-meta sel-test {:watchers {:test-runner-watch refresh-test-output}})
-          (katello.conf/trace-list) 
-          test-results-ref)
+         (with-meta sel-test
+           (update-in (meta sel-test)
+                      [:watchers]
+                      assoc :test-runner-watch refresh-test-output))
+         (katello.conf/trace-list) 
+         test-results-ref)
         (alert "Test Run Complete")
         (.setValue prog-bar 0)
         (.setStringPainted prog-bar false)))))
