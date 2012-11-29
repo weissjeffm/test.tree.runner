@@ -37,7 +37,7 @@
 (def test-results-ref (atom nil))
 (def in-repl? true)
 (def need-save? false)
-(def trace-trees (atom nil))
+(def trace-trees (atom {}))
 
 (def output-tree-renderer 
   (proxy [DefaultTreeCellRenderer] []
@@ -191,39 +191,37 @@
                          summary-node 0)))))
 
 
-(defn update-trace-tree [trace-tree]
-  (let [test-result (-> @test-results-ref second deref (get running-test))
+(defn update-trace-tree [trace-tree test-map]
+  (let [test-report (-> @test-results-ref second deref (get test-map) (get :report))
         trace-tree-model (.getModel trace-tree)]
-    ;(pprint (-> test-results (get running-test)))
-    (when (contains? test-result :report)
-  (loop [trace-list     (-> test-result
-                            (get :report) 
-                            (get :error) 
-                            (get :trace)
-                            .trace-list)
-         parent-node    (.getRoot trace-tree-model)
-         node-idx-stack [0]]
-    (when-first [trace-item trace-list]
-      (let [child-count (.getChildCount parent-node) 
-            node-label  (-> trace-item first pprint with-out-str)
-            is-ret-val? (last trace-item)
-            match-nodes (for [node-idx (-> node-idx-stack last (range child-count))
-                              :let [node (.getChildAt parent-node node-idx)] 
-                              :when (= (.getUserObject node) node-label)] node-idx)
-            found-match? (not (empty? match-nodes))
-            node-idx     (if found-match? (first match-nodes) child-count)
-            child-node   (if found-match? (.getChildAt parent-node node-idx) 
-                                          (DefaultMutableTreeNode. node-label))
-            rest-trace-list (rest trace-list)]
-        (when-not found-match? (.insertNodeInto trace-tree-model
-                                                child-node
-                                                parent-node
-                                                child-count))
-        (let [node-idx-stack (drop-last node-idx-stack)]
-          (if is-ret-val?
-            (recur rest-trace-list (.getParent parent-node) node-idx-stack)
-            (recur rest-trace-list child-node (conj (vec node-idx-stack) (inc node-idx) 0))))))))
-    (.expandRow trace-tree 0)))
+    (when (contains? test-report :error)
+      (loop [trace-list     (-> test-report
+                                (get :error) 
+                                (get :trace)
+                                .trace-list)
+             parent-node    (.getRoot trace-tree-model)
+             node-idx-stack [0]]
+        (when-first [trace-item trace-list]
+          (let [child-count (.getChildCount parent-node) 
+                node-label  (-> trace-item first pprint with-out-str)
+                is-ret-val? (last trace-item)
+                match-nodes (for [node-idx (-> node-idx-stack last (range child-count))
+                                  :let [node (.getChildAt parent-node node-idx)] 
+                                  :when (= (.getUserObject node) node-label)] node-idx)
+                found-match? (not (empty? match-nodes))
+                node-idx     (if found-match? (first match-nodes) child-count)
+                child-node   (if found-match? (.getChildAt parent-node node-idx) 
+                                              (DefaultMutableTreeNode. node-label))
+                rest-trace-list (rest trace-list)]
+            (when-not found-match? (.insertNodeInto trace-tree-model
+                                                    child-node
+                                                    parent-node
+                                                    child-count))
+            (let [node-idx-stack (drop-last node-idx-stack)]
+              (if is-ret-val?
+                (recur rest-trace-list (.getParent parent-node) node-idx-stack)
+                (recur rest-trace-list child-node (conj (vec node-idx-stack) (inc node-idx) 0))))))))
+        (.expandRow trace-tree 0)))
 
 
 (defn view-trace-click [sel-path]
@@ -234,8 +232,8 @@
         trace-tree-panel (scrollable trace-tree 
                                      :hscroll :as-needed 
                                      :vscroll :always)]
-    (update-trace-tree trace-tree)
-    (swap! trace-trees conj trace-tree)
+    (update-trace-tree trace-tree test-map)
+    (swap! trace-trees conj {test-map trace-tree})
     (.setCellRenderer trace-tree trace-tree-renderer)
     ; Expand all nodes in trace tree
     (loop [row 0
@@ -285,7 +283,8 @@
 
 (defn refresh-test-output [watch-key watch-ref old-state new-state]
   (load-test-output new-state)
-  (doseq [trace-tree @trace-trees] (update-trace-tree trace-tree))
+  (doseq [test-map (keys @trace-trees)]
+    (update-trace-tree (get @trace-trees test-map) test-map))
   (def need-save? true))
 
 
@@ -363,6 +362,7 @@
         (let [results (-> filename slurp read-string)
               test-map (first results)
               test-report (second results)]
+          (reset! test-results-ref [(first results) (ref (second results))])
           (def running-test test-map)
           (reset-output-tree test-map)
           (load-test-output test-report))))))
@@ -400,7 +400,7 @@
 
 (defn reset-state []
   (reset! test-results-ref nil)
-  (reset! trace-trees nil)
+  (reset! trace-trees {})
   (.removeAllChildren test-tree-root)
   (.reload test-tree-model)
   (.removeAllChildren output-tree-root)
