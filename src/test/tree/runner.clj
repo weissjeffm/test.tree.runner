@@ -397,6 +397,9 @@
     (when-not (nil? tree-map-symbol) 
       (try
         (def ^:dynamic test-map (-> tree-map-symbol read-string eval))
+        (.valueForPathChanged test-tree-model 
+                              (TreePath. test-tree-root) 
+                              tree-map-symbol)
         (load-test-tree)  
         (catch Exception e (alert (.getMessage e)))))))
 
