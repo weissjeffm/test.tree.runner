@@ -20,6 +20,8 @@
 (def main-win-width 900)
 (def main-win-height 600)
 (def win-title "Interactive Test Runner")
+(def config-rsrc "test/tree/icons/config-small.png") 
+(def test-rsrc "test/tree/icons/test-small.png") 
 
 (def prog-bar (progress-bar :value 0))
 (def ^:dynamic test-map nil)
@@ -38,13 +40,48 @@
 (def in-repl? true)
 (def need-save? false)
 (def trace-trees (atom {}))
+(def is-running? (atom false))
+
+
+(defn getPathFromNode [node]
+  (if-let [parent-node (.getParent node)]
+    (.pathByAddingChild (getPathFromNode parent-node) node)
+    (TreePath. node)))
+
+
+(defn get-test-entry-from-path [test-map path path-idx]
+  (let [next-path-idx (inc path-idx)]
+    (if (<= (.getPathCount path) next-path-idx)
+      test-map
+      (let [cur-node (.getPathComponent path path-idx) 
+            child-node (.getPathComponent path next-path-idx)
+            index (.getIndex cur-node child-node)
+            child-test-map (nth (:more test-map) (.getIndex cur-node child-node))]
+        (if (<= (dec (.getPathCount path)) next-path-idx)
+          child-test-map
+          (get-test-entry-from-path child-test-map path next-path-idx))))))
+
+
+(def test-tree-renderer 
+  (proxy [DefaultTreeCellRenderer] []
+    (getTreeCellRendererComponent [tree value selected? expanded? leaf? row hasFocus?]
+      (let [this        (proxy-super getTreeCellRendererComponent tree value selected? expanded? leaf? row hasFocus?)
+            test-map    (get-test-entry-from-path test-map (getPathFromNode value) 1)]
+        (if (= value test-tree-root)
+          (.setIcon this nil)
+          
+          (.setIcon this (-> (ClassLoader/getSystemClassLoader) 
+                             (.getResource (if (:configuration test-map) config-rsrc test-rsrc)) 
+                             ImageIcon.))) 
+        this))))
+
 
 (def output-tree-renderer 
   (proxy [DefaultTreeCellRenderer] []
     (getTreeCellRendererComponent [tree value selected? expanded? leaf? row hasFocus?]
       (let [this (proxy-super getTreeCellRendererComponent tree value selected? expanded? leaf? row hasFocus?)]
         (locking output-tree-lock
-          (.setOpaque this false) 
+          (.setOpaque this false)
           (let [child-enum (.children value)]
             (while (.hasMoreElements child-enum) 
               (let [child (.nextElement child-enum)
@@ -72,13 +109,6 @@
         this))))
 
 
-(defn is-running? []
-  (let [test-results @test-results-ref] 
-    (if (nil? test-results)
-        false
-        (not= (state (first test-results) (second test-results)) :finished))))
-
-
 (defn add-test-groups [test-group tree-node]
   (let [group-name (first (:groups test-group))
         new-node (DefaultMutableTreeNode. (str (:name test-group)))]
@@ -91,26 +121,13 @@
         (add-test-groups child-group new-node)))))
 
 
-(defn get-test-entry-from-path [test-map path path-idx]
-  (let [next-path-idx (inc path-idx)]
-    (if (<= (.getPathCount path) next-path-idx)
-      test-map
-      (let [cur-node (.getPathComponent path path-idx) 
-            child-node (.getPathComponent path next-path-idx)
-            index (.getIndex cur-node child-node)
-            child-test-map (nth (:more test-map) (.getIndex cur-node child-node))]
-        (if (<= (dec (.getPathCount path)) next-path-idx)
-          child-test-map
-          (get-test-entry-from-path child-test-map path next-path-idx))))))
-
-
 (defn selected-item-changed [event-info]
   (let [path (.getPath event-info)
         sel-test (get-test-entry-from-path test-map path 1)
-        panel-print (fn [& stuff]
+        panel-print (fn [& output]
                       (binding [*print-right-margin* 60]
                         (with-out-str 
-                          (apply pprint stuff))))
+                          (apply pprint output))))
         fields [:file :line :groups :parameters :blockers :steps]]
     (doseq [index (-> fields count range)]
       (.setValueAt test-info-model (panel-print ((nth fields index) sel-test)) index 1))))
@@ -162,13 +179,13 @@
         (add-report-node output-node "Parameters" (:parameters results))
         true)
       (contains? test-group :more)
-      (let [child-enum (.children output-node)]
-        (doseq [child-group (:more test-group)
-                :while (not (update-output-node report-group
-                                                report
-                                                child-group 
-                                                (.nextElement child-enum)))])
-        false))))
+      (let [child-enum (.children output-node)
+            recur-res  (for [child-group (:more test-group)] 
+                         (update-output-node report-group
+                                             report
+                                             child-group 
+                                             (.nextElement child-enum)))] 
+        (some true? recur-res)))))
 
 
 (defn set-summary-info [summary-node 
@@ -301,7 +318,7 @@
 
 (defn run-test-click [test-tree]
   ;; TODO:) Check need-save?
-  (if (is-running?)
+  (if @is-running?
     (alert "Wait for current run to complete before running more tests.")
     
     (let [sel-path (.getSelectionPath test-tree)
@@ -315,6 +332,7 @@
         (.expandRow output-tree node-index))
   
       ;; Start test run
+      (reset! is-running? true)
       (future 
         (debug/debug 
          (with-meta sel-test
@@ -325,7 +343,8 @@
          test-results-ref)
         (alert "Test Run Complete")
         (.setValue prog-bar 0)
-        (.setStringPainted prog-bar false)))))
+        (.setStringPainted prog-bar false)
+        (reset! is-running? false)))))
 
 
 (defn mouse-pressed [sender e]
@@ -342,7 +361,9 @@
                            (menu-item :text "Terminate Run" 
                                       :id :terminate-menu-item
                                       :listen [:action (fn [sender]
-                                                         (test.tree/terminate-all-tests (first @test-results-ref)))]))
+                                                         (when @is-running?
+                                                           (test.tree/terminate-all-tests (first @test-results-ref))
+                                                           (reset! is-running? false)))]))
                        (= sender output-tree)
                          (list
                            (menu-item :text "View Trace"
@@ -356,7 +377,7 @@
 
 
 (defn open-results [sender]
-  (if (is-running?) 
+  (if @is-running?
     (alert "Wait for tests to complete before loading results.")
     (let [filename (choose-file (to-root sender)
                                 :type :open
@@ -372,7 +393,7 @@
 
 
 (defn save-results [sender]
-  (cond (is-running?)  (alert "Wait for tests to complete before saving results.")
+  (cond @is-running? (alert "Wait for tests to complete before saving results.")
         (nil? @test-results-ref) (alert "No results available.")
         :else (let [filename (choose-file (to-root sender)
                                           :type :save
@@ -383,22 +404,25 @@
                   (def need-save? false)))))
 
 
-(defn load-test-tree []
-  (.removeAllChildren test-tree-root)
-  (add-test-groups test-map test-tree-root)
-  (.reload test-tree-model)
-  (doseq [node-index (range 2)] (.expandRow test-tree node-index)))
+(defn load-test-tree [tree-map-symbol]
+  (when-not (nil? tree-map-symbol)
+    (.valueForPathChanged test-tree-model 
+                          (TreePath. test-tree-root) 
+                          tree-map-symbol)
+    (.removeAllChildren test-tree-root)
+    (try
+      (def ^:dynamic test-map (-> tree-map-symbol read-string eval))
+      (add-test-groups test-map test-tree-root)
+      (.reload test-tree-model)
+      (doseq [node-index (range 2)] (.expandRow test-tree node-index))
+      (catch Exception e (alert (.getMessage e))))))
 
 
 (defn load-test-tree-map [sender]
   (let [tree-map-symbol (input "Enter fully qualified test tree map symbol:"
                                :title "Load Test Tree Map" 
                                :type :question)]
-    (when-not (nil? tree-map-symbol) 
-      (try
-        (def ^:dynamic test-map (-> tree-map-symbol read-string eval))
-        (load-test-tree)  
-        (catch Exception e (alert (.getMessage e)))))))
+    (load-test-tree tree-map-symbol)))
 
 
 (defn reset-state []
@@ -414,6 +438,7 @@
 
   (reset-state)
 
+  (.setCellRenderer test-tree test-tree-renderer)
   (.setCellRenderer output-tree output-tree-renderer) 
 
   ; Set up test info table
@@ -442,11 +467,20 @@
                    (menu-item :text "Load Test Tree"
                               :id :load-test-tree-menu
                               :listen [:action #(load-test-tree-map %)])
+                   (menu-item :text "Reload Test Tree"
+                              :id :reload-test-tree-menu
+                              :listen [:action (fn [_] (load-test-tree (.getUserObject test-tree-root)))])
                    (menu-item :text "Exit" 
                               :id :exit-menu)
                    (menu      :text "File" 
                               :id :file-menu 
-                              :items [open-menu save-menu (separator) load-test-tree-menu (separator) exit-menu])
+                              :items [open-menu 
+                                      save-menu 
+                                      (separator) 
+                                      load-test-tree-menu 
+                                      reload-test-tree-menu 
+                                      (separator) 
+                                      exit-menu])
                    (menubar   :id :main-menu-bar 
                               :items [file-menu])
                    (frame     :id :main-frame
@@ -466,7 +500,7 @@
         :mouse-pressed #(mouse-pressed output-tree %))
 
       (when-not (nil? test-tree-map) 
-        (def ^:dynamic test-map test-tree-map)
+        (def ^:dynamic test-map (-> test-tree-map read-string eval))
         (load-test-tree))
 
       (show! main-frame))))
