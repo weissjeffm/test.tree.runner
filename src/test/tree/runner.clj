@@ -22,6 +22,7 @@
 (def win-title "Interactive Test Runner")
 (def config-rsrc "test/tree/icons/config-small.png") 
 (def test-rsrc "test/tree/icons/test-small.png") 
+(def parent-rsrc "test/tree/icons/parent-small.png") 
 
 (def prog-bar (progress-bar :value 0))
 (def ^:dynamic test-map nil)
@@ -62,6 +63,12 @@
           (get-test-entry-from-path child-test-map path next-path-idx))))))
 
 
+(defn get-icon [icon-path]
+  (-> (ClassLoader/getSystemClassLoader) 
+                             (.getResource icon-path) 
+                             ImageIcon.))
+
+
 (def test-tree-renderer 
   (proxy [DefaultTreeCellRenderer] []
     (getTreeCellRendererComponent [tree value selected? expanded? leaf? row hasFocus?]
@@ -69,10 +76,9 @@
             test-map    (get-test-entry-from-path test-map (getPathFromNode value) 1)]
         (if (= value test-tree-root)
           (.setIcon this nil)
-          
-          (.setIcon this (-> (ClassLoader/getSystemClassLoader) 
-                             (.getResource (if (:configuration test-map) config-rsrc test-rsrc)) 
-                             ImageIcon.))) 
+          (.setIcon this (get-icon (cond (:configuration test-map) config-rsrc 
+                                         (:more test-map)          parent-rsrc
+                                         :else test-rsrc))))
         this))))
 
 
@@ -89,11 +95,13 @@
                     status (->> child-str (re-find #"Status: (\w+)") second keyword)
                     result (->> child-str (re-find #"Result: (\w+)") second keyword)]
                 (when (keyword? result)
+                  (.setIcon this (get-icon test-rsrc))
                   (.setOpaque this true)
                   (.setBackground this (cond (= result :pass) java.awt.Color/green
                                              (= result :skip) java.awt.Color/yellow
                                              (= result :fail) java.awt.Color/red)))
                 (when (keyword? status)
+                  (.setIcon this (get-icon test-rsrc))
                   (.setOpaque this true)
                   (cond (= status :queued)  (.setBackground this java.awt.Color/lightGray)
                         (= status :running) (.setBackground this java.awt.Color/magenta))))))
