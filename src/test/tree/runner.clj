@@ -1,7 +1,10 @@
 (ns test.tree.runner
   (:require clojure.pprint
             [test.tree :refer [state]]
-            [test.tree.debug :as debug]
+            (test.tree
+             [debug :as debug]
+             [reporter :as reporter])
+    
             [fn.trace :as trace]
             [clojure.pprint :refer [pprint *print-right-margin*]])
   (:use seesaw.core
@@ -173,12 +176,11 @@
 
 
 (defn update-output-node [report-group report test-group output-node]
-  (let [results (:report report)]
+  (let [results (-> report :report deref)]
     (cond 
       (= test-group report-group)
       (do
         (add-report-node output-node "Stack Trace" (-> results :error :throwable))
-        (add-report-node output-node "Promise" (:promise report)) 
         (add-report-node output-node "Return Value" (:returned results)) 
         (add-report-node output-node "End Time" (get-date-string (:end-time results))) 
         (add-report-node output-node "Start Time" (get-date-string (:start-time results))) 
@@ -217,7 +219,7 @@
 
 
 (defn update-trace-tree [trace-tree test-map]
-  (let [test-report (-> @test-results-ref second deref (get test-map) (get :report))
+  (let [test-report (-> @test-results-ref second deref (get test-map) :report deref)
         trace-tree-model (.getModel trace-tree)]
     (when (contains? test-report :error)
       (loop [trace-list     (-> test-report
@@ -285,7 +287,7 @@
           summary-node (.getFirstChild output-tree-root)]
       (doseq [report-key (keys test-output)
               :let [report-val (get test-output report-key)
-                    result (-> report-val :report :result)]]
+                    result (-> report-val :report deref :result)]]
           (when (= (:status report-val) :done) (swap! test-done inc))
           (swap! test-total inc)
           (swap!  (cond (= result :pass) test-pass
@@ -341,14 +343,14 @@
   
       ;; Start test run
       (reset! is-running? true)
+
+      ;; TODO read a var from the ui and merge on top of these defaults.
+      ;; be sure to merge the watchers given with the defaults, separately.
       (future 
-        (debug/debug 
-         (with-meta sel-test
-           (update-in (meta sel-test)
-                      [:watchers]
-                      assoc :test-runner-watch refresh-test-output))
-         (katello.conf/trace-list) 
-         test-results-ref)
+        (debug/debug sel-test {:watchers {:test-runner-watch refresh-test-output}
+                               :reports-ref test-results-ref
+                               :trace-list []}) 
+        
         (alert "Test Run Complete")
         (.setValue prog-bar 0)
         (.setStringPainted prog-bar false)
