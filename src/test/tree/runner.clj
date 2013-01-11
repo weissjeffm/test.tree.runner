@@ -40,11 +40,12 @@
 (def output-tree-lock (atom nil))
 
 (def running-test nil)
-(def test-results-ref (atom nil))
+(def test-results-ref (ref nil))
 (def in-repl? true)
 (def need-save? false)
 (def trace-trees (atom {}))
 (def is-running? (atom false))
+(def test-params-map-name "")
 
 
 (defn getPathFromNode [node]
@@ -68,15 +69,15 @@
 
 (defn get-icon [icon-path]
   (-> (ClassLoader/getSystemClassLoader) 
-                             (.getResource icon-path) 
-                             ImageIcon.))
+      (.getResource icon-path) 
+      ImageIcon.))
 
 
 (def test-tree-renderer 
   (proxy [DefaultTreeCellRenderer] []
     (getTreeCellRendererComponent [tree value selected? expanded? leaf? row hasFocus?]
-      (let [this        (proxy-super getTreeCellRendererComponent tree value selected? expanded? leaf? row hasFocus?)
-            test-map    (get-test-entry-from-path test-map (getPathFromNode value) 1)]
+      (let [this     (proxy-super getTreeCellRendererComponent tree value selected? expanded? leaf? row hasFocus?)
+            test-map (get-test-entry-from-path test-map (getPathFromNode value) 1)]
         (if (= value test-tree-root)
           (.setIcon this nil)
           (.setIcon this (get-icon (cond (:configuration test-map) config-rsrc 
@@ -287,18 +288,18 @@
           summary-node (.getFirstChild output-tree-root)]
       (doseq [report-key (keys test-output)
               :let [report-val (get test-output report-key)
-                    result (-> report-val :report deref :result)]]
-          (when (= (:status report-val) :done) (swap! test-done inc))
-          (swap! test-total inc)
-          (swap!  (cond (= result :pass) test-pass
-                        (= result :fail) test-fail
-                        (= result :skip) test-skip
-                        :else            test-unk)
-                  inc)
-          (update-output-node report-key 
-                              report-val
-                              running-test 
-                              (.getNextSibling summary-node)))
+                    result     (-> report-val :report deref :result)]]
+        (when (= (:status report-val) :done) (swap! test-done inc))
+        (swap! test-total inc)
+        (swap!  (cond (= result :pass) test-pass
+                      (= result :fail) test-fail
+                      (= result :skip) test-skip
+                      :else            test-unk)
+                inc)
+        (update-output-node report-key 
+                            report-val
+                            running-test 
+                            (.getNextSibling summary-node)))
       (.setMaximum prog-bar @test-total)
       (.setValue prog-bar @test-done)
       (set-summary-info summary-node
@@ -309,7 +310,7 @@
 
 
 (defn refresh-test-output [watch-key watch-ref old-state new-state]
-  (load-test-output new-state)
+  (load-test-output @watch-ref)
   (doseq [test-map (keys @trace-trees)]
     (update-trace-tree (get @trace-trees test-map) test-map))
   (def need-save? true))
@@ -327,34 +328,46 @@
 
 
 (defn run-test-click [test-tree]
-  ;; TODO:) Check need-save?
+  ;; TODO: Check need-save?
   (if @is-running?
     (alert "Wait for current run to complete before running more tests.")
     
     (let [sel-path (.getSelectionPath test-tree)
           sel-test (get-test-entry-from-path test-map sel-path 1)]
   
-      (def running-test sel-test)
-      (reset-output-tree sel-test)
-  
-      (.setStringPainted prog-bar true)
-      (doseq [node-index (-> 3 range reverse)] 
-        (.expandRow output-tree node-index))
-  
-      ;; Start test run
-      (reset! is-running? true)
+      ;; Read var from ui and merge on top of defaults
+      (when-let [test-params (input "Enter test params map symbol:"
+                                    :title "Test Parameters"
+                                    :value test-params-map-name
+                                    :type :question)]
 
-      ;; TODO read a var from the ui and merge on top of these defaults.
-      ;; be sure to merge the watchers given with the defaults, separately.
-      (future 
-        (debug/debug sel-test {:watchers {:test-runner-watch refresh-test-output}
-                               :reports-ref test-results-ref
-                               :trace-list []}) 
-        
-        (alert "Test Run Complete")
-        (.setValue prog-bar 0)
-        (.setStringPainted prog-bar false)
-        (reset! is-running? false)))))
+        (def test-params-map-name test-params)
+
+        (def running-test sel-test)
+        (reset-output-tree sel-test)
+  
+        (.setStringPainted prog-bar true)
+        (doseq [node-index (-> 3 range reverse)] 
+          (.expandRow output-tree node-index))
+  
+        ;; Start test run
+        (reset! is-running? true)
+
+        (let [user-test-params-map (if (empty? test-params-map-name) 
+                                       nil
+                                       (-> test-params-map-name read-string eval))
+              test-params-map (merge user-test-params-map
+                                     {:reports-ref test-results-ref}
+                                     {:watchers (merge (:watchers user-test-params-map)
+                                                       {:test-runner-watch refresh-test-output})})]
+          (future 
+            (try 
+              (debug/debug sel-test test-params-map) 
+              (alert "Test Run Complete")
+              (catch Exception e (-> e .toString alert) (.printStackTrace e)))
+            (.setValue prog-bar 0)
+            (.setStringPainted prog-bar false)
+            (reset! is-running? false)))))))
 
 
 (defn mouse-pressed [sender e]
@@ -386,20 +399,34 @@
         (.show popup-menu sender x y)))))
 
 
-(defn open-results [sender]
+(defn open-results-str [results-str]
+  (let [results (read-string results-str)
+        test-map (first results)
+        test-report (second results)]
+    (dosync (ref-set test-results-ref [test-map (ref test-report)]))
+    (def running-test test-map)
+    (reset-output-tree test-map)
+    (load-test-output test-report)))
+
+
+(defn open-results-file [sender]
   (if @is-running?
     (alert "Wait for tests to complete before loading results.")
     (let [filename (choose-file (to-root sender)
                                 :type :open
                                 :filters [["Clojure Files" ["clj"]]])]
-      (when filename
-        (let [results (-> filename slurp read-string)
-              test-map (first results)
-              test-report (second results)]
-          (reset! test-results-ref [(first results) (ref (second results))])
-          (def running-test test-map)
-          (reset-output-tree test-map)
-          (load-test-output test-report))))))
+      (when filename (-> filename slurp open-results-str)))))
+
+
+(defn open-results-url [sender]
+  (if @is-running?
+    (alert "Wait for tests to complete before loading results.")
+    (let [res-url (input "Enter URL to results to be loaded:"
+                         :title "Load Results From URL" 
+                         :type :question)]
+      (with-open [stream (.openStream (java.net.URL. res-url))]
+        (let [buffer (-> stream java.io.InputStreamReader. java.io.BufferedReader.)]
+          (->> buffer line-seq (apply str) open-results-str))))))
 
 
 (defn save-results [sender]
@@ -425,7 +452,7 @@
       (add-test-groups test-map test-tree-root)
       (.reload test-tree-model)
       (doseq [node-index (range 2)] (.expandRow test-tree node-index))
-      (catch Exception e (alert (.getMessage e))))))
+      (catch Exception e (-> e .toString alert)))))
 
 
 (defn load-test-tree-map [sender]
@@ -436,7 +463,7 @@
 
 
 (defn reset-state []
-  (reset! test-results-ref nil)
+  (dosync (ref-set test-results-ref nil))
   (reset! trace-trees {})
   (.removeAllChildren test-tree-root)
   (.reload test-tree-model)
@@ -468,13 +495,16 @@
                                  :center output-tree-scroll
                                  :south  prog-bar) 
                    (left-right-split left-pane right-pane :id :main-panel :divider-location (/ main-win-width 3))
-                   (menu-item :text "Open Results" 
-                              :id :open-menu 
-                              :listen [:action #(open-results %)])
+                   (menu-item :text "Open Results File..."
+                              :id :open-file-menu 
+                              :listen [:action #(open-results-file %)])
+                   (menu-item :text "Open Results URL..." 
+                              :id :open-url-menu 
+                              :listen [:action #(open-results-url %)])
                    (menu-item :text "Save Results" 
                               :id :save-menu 
                               :listen [:action #(save-results %)])
-                   (menu-item :text "Load Test Tree"
+                   (menu-item :text "Load Test Tree..."
                               :id :load-test-tree-menu
                               :listen [:action #(load-test-tree-map %)])
                    (menu-item :text "Reload Test Tree"
@@ -484,7 +514,8 @@
                               :id :exit-menu)
                    (menu      :text "File" 
                               :id :file-menu 
-                              :items [open-menu 
+                              :items [open-file-menu 
+                                      open-url-menu
                                       save-menu 
                                       (separator) 
                                       load-test-tree-menu 
